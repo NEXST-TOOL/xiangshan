@@ -1,15 +1,15 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
-	url = ssh://git@gitlab.agileserve.org.cn:8082/serve_hw_sw_dev/xiangshan-submodule/rocket-chip.git
+	url = ../xiangshan-submodule/rocket-chip.git
 [submodule "difftest"]
 	path = difftest
-	url = ssh://git@gitlab.agileserve.org.cn:8082/serve_hw_sw_dev/xiangshan-submodule/difftest.git
+	url = ../xiangshan-submodule/difftest.git
 [submodule "ready-to-run"]
 	path = ready-to-run
-	url = ssh://git@gitlab.agileserve.org.cn:8082/serve_hw_sw_dev/xiangshan-submodule/ready-to-run.git
+	url = ../xiangshan-submodule/ready-to-run.git
 [submodule "huancun"]
 	path = huancun
-	url = ssh://git@gitlab.agileserve.org.cn:8082/serve_hw_sw_dev/xiangshan-submodule/huancun.git
+	url = ../xiangshan-submodule/huancun.git
 [submodule "fudian"]
 	path = fudian
-	url = ssh://git@gitlab.agileserve.org.cn:8082/serve_hw_sw_dev/xiangshan-submodule/fudian.git
+	url = ../xiangshan-submodule/fudian.git
