@@ -282,7 +282,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           address = 0x39000000,
           numCores = tiles.size
         )),
-        sramClkDivBy2 = true,
+        sramClkDivBy2 = false,
         sramDepthDiv = 4,
         tagECC = None,
         dataECC = None,
@@ -331,13 +331,13 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
         RenameWidth = 4,
         FetchWidth = 8,
         IssQueSize = 8,
-        NRPhyRegs = 128,
+        NRPhyRegs = 64,
         LoadQueueSize = 32,
         LoadQueueNWriteBanks = 4,
-        StoreQueueSize = 16,
+        StoreQueueSize = 24,
         StoreQueueNWriteBanks = 4,
-        RobSize = 128,
-        FtqSize = 32,
+        RobSize = 96,
+        FtqSize = 16,
         IBufSize = 32,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
@@ -360,6 +360,11 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
           LduCnt = 2,
           StuCnt = 2
         ),
+        prefetcher = None,
+        EnableSC = false,
+        EnableLoop = false,
+        FtbSize = 1024,
+        UbtbSize = 128,
         // 4-way 16KB DCache        
         icacheParameters = ICacheParameters(
           nSets = 64, 
@@ -446,6 +451,34 @@ class NanHuGFPGAConfig(n: Int = 1) extends Config(
   new NanHuGConfig(n).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false
+    )
+  })
+)
+
+class NanHuGServeConfig(n: Int = 1) extends Config(
+  new NanHuGFPGAConfig(n).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      ))
+    )
+  })
+)
+
+class MinimalFPGAConfig(n: Int = 1) extends Config(
+  new MinimalConfig(n).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false
+    )
+  })
+)
+
+class NanHuGServeConfig(n: Int = 1) extends Config(
+  new NanHuGFPGAConfig(n).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      ))
     )
   })
 )
