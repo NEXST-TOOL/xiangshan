@@ -455,16 +455,6 @@ class NanHuGFPGAConfig(n: Int = 1) extends Config(
   })
 )
 
-class NanHuGServeConfig(n: Int = 1) extends Config(
-  new NanHuGFPGAConfig(n).alter((site, here, up) => {
-    case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
-        sramClkDivBy2 = false,
-      ))
-    )
-  })
-)
-
 class MinimalFPGAConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
