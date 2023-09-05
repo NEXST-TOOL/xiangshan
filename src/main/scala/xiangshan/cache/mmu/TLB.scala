@@ -26,6 +26,7 @@ import utils._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
+import device.lvna.NohypeMapper
 
 
 @chiselName
@@ -59,6 +60,20 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val vpn = reqAddr.map(_.vpn)
   val cmd = req.map(_.bits.cmd)
   val valid = req.map(_.valid)
+
+  val nohypeMaps = if (coreParams.LvnaEnable){
+    Some(
+      Seq.fill(Width){
+        val nohypeMapper = Module(new NohypeMapper(PAddrBits))
+        nohypeMapper.io.memOffset := io.memOffset
+        nohypeMapper.io.ioOffset := io.ioOffset
+        nohypeMapper
+      }
+    )
+  }
+  else 
+    None
+  
 
   def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
 
@@ -159,7 +174,15 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       val pf = perm.pf
       val af = perm.af
       val paddr = Cat(ppn, offReg)
-      resp(i).bits.paddr(d) := Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+      if (coreParams.LvnaEnable) {
+        // add offset to paddr for nohype cores
+        val origin_paddr = Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+        nohypeMaps.get(i).io.inAddr := origin_paddr
+        resp(i).bits.paddr(d) := nohypeMaps.get(i).io.outAddr
+      }
+      else {
+        resp(i).bits.paddr(d) := Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
+      }
 
       val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
       val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
@@ -363,7 +386,10 @@ object TLB {
     width: Int,
     nRespDups: Int = 1,
     shouldBlock: Boolean,
-    q: TLBParameters
+    q: TLBParameters,
+    // add nohype control
+    memOffset: Option[UInt],
+    ioOffset: Option[UInt]
   )(implicit p: Parameters) = {
     require(in.length == width)
 
@@ -372,6 +398,11 @@ object TLB {
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")
+    // add nohype control
+    if (p(XSCoreParamsKey).LvnaEnable) {
+      tlb.io.memOffset := memOffset.get
+      tlb.io.ioOffset := ioOffset.get
+    }
 
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

@@ -32,6 +32,7 @@ import top.BusPerfMonitor
 import xiangshan.backend.fu.PMAConst
 import huancun._
 import huancun.debug.TLLogger
+import device.lvna._
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -39,6 +40,9 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 36,
+  LvnaEnable: Boolean = false,
+  NohypeDevOffset: Int = 0x0,
+  dsidWidth: Int = 5,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -74,6 +78,9 @@ trait HasSoCParameter {
   val L3OuterBusWidth = soc.L3OuterBusWidth
 
   val NrExtIntr = soc.extIntrs
+
+  val LvnaEnable = soc.LvnaEnable
+  val NohypeDevOffset = soc.NohypeDevOffset
 }
 
 class ILABundle extends Bundle {}
@@ -194,6 +201,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   val peripheralRange = AddressSet(
     0x0, 0x7fffffff
   ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+  .flatMap(x => x.subtract(AddressSet(0x0, 0xfffffff)))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
       address = peripheralRange,
@@ -247,9 +255,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
+  val tokenBuckets = Array.fill(NumCores) { LazyModule(new TokenBucketNode()) }
+
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=*
       TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
+      tokenBuckets(i).node :=
       TLBuffer() :=
       core_out
   }
@@ -257,6 +268,18 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
+
+  val alter_clints =
+    if (LvnaEnable && NohypeDevOffset != 0)
+      Some(
+        (1 until NumCores).map(i => {
+          val clint = LazyModule(new CLINT(CLINTParams(0x38000000L + i * NohypeDevOffset), 8))
+          clint.node := peripheralXbar
+          clint
+        })
+      )
+    else
+      None
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
     val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
@@ -291,6 +314,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     TLBuffer.chainNode(4) :=
     peripheralXbar
 
+  val controlPlane = LazyModule(new ControlPlane(8)(p))
+  controlPlane.tlNode := peripheralXbar
+
   lazy val module = new LazyModuleImp(this){
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
@@ -316,6 +342,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val tick = cnt === 0.U
     cnt := Mux(tick, (freq - 1).U, cnt - 1.U)
     clint.module.io.rtcTick := tick
+    if (soc.LvnaEnable && alter_clints.isDefined) {
+      alter_clints.get.zipWithIndex.foreach { case (clint, i) =>
+        clint.module.io.rtcTick := tick
+      }
+    }
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
@@ -336,5 +367,20 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
         ))
       )
     )
+
+    val cp2coresIO  = if (LvnaEnable) Some(IO(new CPToCore)) else None
+    if (LvnaEnable){
+      cp2coresIO.get := controlPlane.module.io.core
+    }
+    val cp2l3IO = if (LvnaEnable) Some(IO(new CPToHuanCunIO)) else None
+    if (LvnaEnable) {
+      cp2l3IO.get <> controlPlane.module.io.huancun
+    }
+
+    if (LvnaEnable) {
+      val cpTBIO = controlPlane.module.bucketIO
+      val tbIOs = tokenBuckets.map(_.module.bucketIO)
+      cpTBIO zip tbIOs foreach{case (cptb, tb) => tb <> cptb }
+    }
   }
 }

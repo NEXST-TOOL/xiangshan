@@ -269,6 +269,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val marchid = RegInit(UInt(XLEN.W), 25.U) // architecture id for XiangShan is 25; see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = Reg(UInt(XLEN.W)) // the hardware thread running the code
+  val vhartid = Reg(UInt(XLEN.W))
+  val rhartid = Reg(UInt(XLEN.W))
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mhartid := csrio.hartId
   }
@@ -411,7 +413,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // sdsid: Differentiated Services ID
   val sdsid = RegInit(UInt(XLEN.W), 0.U)
-  csrio.customCtrl.dsid := sdsid
+
+  // nohype configs:
+  // modesel == True use CSR offset, otherwise use controlplane offset
+  val nohypeMemOffset = RegInit(UInt(64.W), 0.U)
+  val nohypeIoOffset = RegInit(UInt(64.W), 0.U)
+  val nohypeModeSel = RegInit(false.B)
+  if (coreParams.LvnaEnable) {
+    csrio.customCtrl.lvna.get.dsid := sdsid
+    csrio.customCtrl.lvna.get.nohypeMemOffset := nohypeMemOffset
+    csrio.customCtrl.lvna.get.nohypeIoOffset := nohypeIoOffset
+    csrio.customCtrl.lvna.get.nohypeModeSel := nohypeModeSel
+  }
 
   // slvpredctl: load violation predict settings
   // Default reset period: 2^16
@@ -592,7 +605,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Marchid, marchid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Mimpid, mimpid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
-    MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    if (coreParams.LvnaEnable) {
+      MaskedRegMap(Mhartid, vhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable)
+    }
+    else {
+      MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable)
+    },
     MaskedRegMap(Mconfigptr, mconfigptr, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
@@ -658,13 +676,21 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       cacheopRegs(name)
     )
   }}
+  val lvnaopMapping = Map(
+    MaskedRegMap(Rhartid, rhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Vhartid, vhartid),
+    MaskedRegMap(NohypeMemOff, nohypeMemOffset),
+    MaskedRegMap(NohypeIoOff, nohypeIoOffset),
+    MaskedRegMap(NohypeModeSel, nohypeModeSel),
+  )
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
                 pmpMapping ++
                 pmaMapping ++
                 (if (HasFPU) fcsrMapping else Nil) ++
-                (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
+                (if (HasCustomCSRCacheOp) cacheopMapping else Nil) ++
+                (if (coreParams.LvnaEnable) lvnaopMapping else Nil)
 
   println("XiangShan CSR Lists")
 
@@ -1161,6 +1187,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
     sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
+  }
+
+  when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    if (coreParams.LvnaEnable) {
+      vhartid := csrio.hartId
+      rhartid := csrio.hartId
+    }
   }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1

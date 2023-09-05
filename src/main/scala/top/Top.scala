@@ -83,6 +83,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
+    if (LvnaEnable && i > 0 && NohypeDevOffset != 0) {
+      core_with_l2(i).clint_int_sink := misc.alter_clints.get(i-1).intnode
+    }
     core_with_l2(i).plic_int_sink :*= misc.plic.intnode
     core_with_l2(i).debug_int_sink := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
@@ -169,11 +172,28 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.hartId := i.U
       io.riscv_halt(i) := core.module.io.cpu_halt
     }
+    if (LvnaEnable) {
+      for ((core, i) <- core_with_l2.zipWithIndex) {
+        core.module.lvnaIO.get.memOffset := misc.module.cp2coresIO.get.memOffsets(i)
+        core.module.lvnaIO.get.ioOffset := misc.module.cp2coresIO.get.ioOffsets(i)
+      }
+    }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
         node.out.head._1 := false.B.asAsyncReset()
+      }
+    }
+
+    if (LvnaEnable){
+      val l3LvNA = l3cacheOpt.get.module.io.lvnaCtrl.get
+      val cp2l3 = misc.module.cp2l3IO.get
+      if (l3cacheOpt.get.hasLvnaCtrl) {
+        l3LvNA.waymaskSetReq <> cp2l3.waymaskSetReq
+      }
+      else{
+        cp2l3.waymaskSetReq.ready := true.B
       }
     }
 

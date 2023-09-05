@@ -32,6 +32,7 @@ import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
+import xiangshan.mem.prefetch.SMSParams
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -186,6 +187,19 @@ class MinimalConfig(n: Int = 1) extends Config(
   })
 )
 
+class NodiffFPGAConfig(n: Int) extends Config((site, here, up) => {
+  case DebugOptionsKey => up(DebugOptionsKey).copy(
+    AlwaysBasicDiff=false,
+  )
+})
+
+class PerfetchMinimalConfig(n: Int) extends Config((site, here, up) => {
+  case XSTileKey =>
+    up(XSTileKey).map(_.copy(
+      prefetcher = Some(SMSParams())  
+    ))
+})
+
 // Non-synthesizable MinimalConfig, for fast simulation only
 class MinimalSimConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
@@ -222,7 +236,8 @@ class WithNKBL2
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
-  alwaysReleaseData: Boolean = false
+  alwaysReleaseData: Boolean = false,
+  hasPrefetch: Boolean = true,
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     val upParams = up(XSTileKey)
@@ -244,7 +259,7 @@ class WithNKBL2
         )),
         reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
+        prefetch = if (hasPrefetch) Some(huancun.prefetch.PrefetchReceiverParams()) else None,
         enablePerf = true,
         sramDepthDiv = 2,
         tagECC = None,
@@ -499,4 +514,187 @@ class DefaultNEXSTConfig(n: Int = 1) extends Config(
       ))
     )
   })
+)
+
+// * Config for labeled XiangShan
+// * L1 cache included
+// * L2 cache NOT included, very small
+// * L3 cache NOT included
+class WithNohypeOffsetDevices(offset: Int= 0x3000000) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val socParams = up(SoCParamsKey)
+    socParams.copy(
+      NohypeDevOffset = offset,
+    )
+})
+
+class WithLvNA extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val socParams = up(SoCParamsKey)
+    val reqKeys = socParams.L3CacheParamsOpt.get.reqKey
+    val newReqKeys = reqKeys ++ Seq(DsidKey)
+    val reqFields = socParams.L3CacheParamsOpt.get.reqField
+    val newReqFields = reqFields ++ Seq(DsidField(5))
+    println(s"withLvNA up ctrl: ${socParams.L3CacheParamsOpt.get.ctrl.get.numCores} ${socParams.L3CacheParamsOpt.get.sets}")
+    val upL3Params = Some(
+      socParams.L3CacheParamsOpt.get.copy(
+        LvnaEnable = true,
+        dsidWidth = 5,
+        reqKey = newReqKeys,
+        reqField = newReqFields,
+        replacement = "srrip",
+        LvnaCtrlEnable = true,
+    ))
+    up(SoCParamsKey).copy(
+      LvnaEnable = true,
+      L3CacheParamsOpt = upL3Params,
+      dsidWidth = 5
+    )
+  case XSTileKey =>
+    val upParams = up(XSTileKey)
+    upParams.map(p => {
+      val l2upP = p.L2CacheParamsOpt
+      val newl2P = if (l2upP.isDefined) {
+        val reqKeys = l2upP.get.reqKey
+        val newReqKeys = reqKeys ++ Seq(DsidKey)
+        val reqFields = l2upP.get.reqField
+        val newReqFields = reqFields ++ Seq(DsidField(5))
+        Some(l2upP.get.copy(
+          LvnaEnable = true,
+          dsidWidth = 5,
+          reqKey = newReqKeys,
+          reqField = newReqFields,
+          belongCoreId = p.HartId,
+        ))
+      }
+      else
+        None
+      val l1iup = p.icacheParameters
+      val l1dupOpt = p.dcacheParametersOpt
+      p.copy(
+        icacheParameters = l1iup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        ),
+        dcacheParametersOpt = l1dupOpt.map(l1dup => l1dup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        )),
+        L2CacheParamsOpt = newl2P,
+        LvnaEnable = true,
+        DsidWidth = 5,
+      )
+    })
+})
+
+
+class WithLvNATile(n: Int = 1) extends Config((site, here, up) => {
+  case XSTileKey =>
+    val upParams = up(XSTileKey)
+    upParams.map(p => {
+      val l2upP = p.L2CacheParamsOpt
+      val newl2P = if (l2upP.isDefined) {
+        val reqKeys = l2upP.get.reqKey
+        val newReqKeys = reqKeys ++ Seq(DsidKey)
+        val reqFields = l2upP.get.reqField
+        val newReqFields = reqFields ++ Seq(DsidField(5))
+        Some(l2upP.get.copy(
+          LvnaEnable = true,
+          dsidWidth = 5,
+          reqKey = newReqKeys,
+          reqField = newReqFields,
+          belongCoreId = p.HartId,
+        ))
+      }
+      else
+        None
+      val l1iup = p.icacheParameters
+      val l1dupOpt = p.dcacheParametersOpt
+      p.copy(
+        icacheParameters = l1iup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        ),
+        dcacheParametersOpt = l1dupOpt.map(l1dup => l1dup.copy(
+          hasDsid = true,
+          dsidWidth = 5,
+        )),
+        L2CacheParamsOpt = newl2P,
+        LvnaEnable = true,
+        DsidWidth = 5,
+      )
+    })
+})
+
+class WithLvNANKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val sets = n * 1024 / banks / ways / 64
+    val tiles = site(XSTileKey)
+    val clientDirBytes = tiles.map{ t =>
+      t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+    }.sum
+    up(SoCParamsKey).copy(
+      L3NBanks = banks,
+      LvnaEnable = true,
+      dsidWidth = 5,
+      L3CacheParamsOpt = Some(HCCacheParameters(
+        name = "L3",
+        level = 3,
+        ways = ways,
+        sets = sets,
+        inclusive = inclusive,
+        clientCaches = tiles.map{ core =>
+          val l2params = core.L2CacheParamsOpt.get.toCacheParams
+          l2params.copy(
+            sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64,
+            blockGranularity = log2Ceil(clientDirBytes / core.L2NBanks / l2params.ways / 64 / tiles.size)
+          )
+        },
+        enablePerf = true,
+        ctrl = Some(CacheCtrl(
+          address = 0x39000000,
+          numCores = tiles.size
+        )),
+        LvnaEnable = true,
+        dsidWidth = 5,
+        reqKey = Seq(PrefetchKey, PreferCacheKey, AliasKey, DsidKey),
+        reqField = Seq(DsidField(5)),
+        replacement = "srrip",
+        LvnaCtrlEnable = true,
+        sramClkDivBy2 = false,
+        sramDepthDiv = 4,
+        tagECC = None,
+        dataECC = None,
+        simulation = !site(DebugOptionsKey).FPGAPlatform
+      ))
+    )
+})
+
+class NohypeSimConfig(n: Int = 1) extends Config(
+  new WithLvNANKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNohypeOffsetDevices(0x3000000)
+    ++ new WithLvNATile(n)
+    ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(64)
+    ++ new PerfetchMinimalConfig(n)
+    ++ new MinimalConfig(n)
+)
+
+class LvNASingleSimConfig(n: Int = 1) extends Config(
+  new WithLvNANKBL3(256, inclusive = false, banks = 1)
+    ++ new WithNohypeOffsetDevices(0x3000000)
+    ++ new WithLvNATile(n)
+    ++ new WithNKBL2(64, inclusive = false, alwaysReleaseData = true, hasPrefetch = false)
+    // ++ new WithNKBL1D(64)
+    ++ new MinimalConfig(n)
+)
+
+class NohypeFPGAConfig(n: Int = 1) extends Config(
+  new WithLvNANKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithLvNATile(n)
+    ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(64)
+    ++ new PerfetchMinimalConfig(n)
+    ++ new NodiffFPGAConfig(n)
+    ++ new MinimalConfig(n)
 )

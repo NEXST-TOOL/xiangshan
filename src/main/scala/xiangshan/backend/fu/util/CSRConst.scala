@@ -93,7 +93,13 @@ trait HasCSRConst {
 
   /** 0x5C5-0x5E5 for cache instruction register*/
 
+  // LvNA csrs
   val Sdsid         = 0x9C0
+  val Rhartid       = 0xBC0
+  val Vhartid       = 0xBC1
+  val NohypeMemOff  = 0xBC2
+  val NohypeIoOff   = 0xBC3
+  val NohypeModeSel = 0xBC4
 
   // Machine Information Registers
   val Mvendorid     = 0xF11

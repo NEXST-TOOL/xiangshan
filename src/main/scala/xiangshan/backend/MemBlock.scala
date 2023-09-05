@@ -107,6 +107,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lqCancelCnt = Output(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(2.W))
+    // add nohype control about mem_offset
+    val memOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
+    val ioOffset = if(coreParams.LvnaEnable) Some(Input(UInt(64.W))) else None
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.writeback))
@@ -118,6 +121,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val csrCtrl = DelayN(io.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  if (coreParams.LvnaEnable) {
+    dcache.io.dsid.get := csrCtrl.lvna.get.dsid
+    uncache.io.dsid.get := csrCtrl.lvna.get.dsid
+  }
   dcache.io.l2_pf_store_only := RegNext(io.csrCtrl.l2_pf_store_only, false.B)
   io.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> RegNext(RegNext(dcache.io.error))
@@ -209,6 +216,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dtlb_pmps = dtlb.flatMap(_.pmp)
   dtlb.zip(sfence_dup.take(2)).foreach{ case (d,s) => d.sfence := s }
   dtlb.zip(tlbcsr_dup.take(2)).foreach{ case (d,c) => d.csr := c }
+  // add nohype control about mem_offset to dtlb
+  if (coreParams.LvnaEnable) {
+    dtlb.foreach(_.memOffset := io.memOffset.get)
+    dtlb.foreach(_.ioOffset := io.ioOffset.get)
+  }
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace)

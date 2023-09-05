@@ -33,6 +33,8 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
+import huancun.utils.RegNextN
+import system.SoCParamsKey
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
   with HasXSParameter
@@ -134,7 +136,9 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
   // interrupt sinks
-  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val clint_int_sink = 
+    if (coreParams.LvnaEnable && coreParams.HartId != 0 && outSoCParams.NohypeDevOffset != 0) IntSinkNode(IntSinkPortSimple(2, 2))
+    else IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
@@ -235,7 +239,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
-  with HasXSDts
+  // with HasXSDts
 {
   lazy val module = new XSCoreImp(this)
 }
@@ -252,6 +256,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+
+  val lvnaIO = if (LvnaEnable) Some(IO(new Bundle {
+      val memOffset = Flipped(ValidIO(UInt(64.W)))
+      val ioOffset = Flipped(ValidIO(UInt(64.W)))
+  }))
+  else
+    None
 
   val frontend = outer.frontend.module
   val ctrlBlock = outer.ctrlBlock.module
@@ -288,6 +299,25 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
   val csrioIn = csrFenceMod.io.fuExtra.csrio.get
   val fenceio = csrFenceMod.io.fuExtra.fenceio.get
+
+  // add nohype control to frontend and memBlock from control plane
+  if (LvnaEnable) {
+    val memOffreg = RegEnable(lvnaIO.get.memOffset.bits, 0.U(64.W), lvnaIO.get.memOffset.fire)
+    val ioOffreg = RegEnable(lvnaIO.get.ioOffset.bits, 0.U(64.W), lvnaIO.get.ioOffset.fire)
+    val csrMemOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeMemOffset)
+    val csrIoOff = WireInit(csrioIn.customCtrl.lvna.get.nohypeIoOffset)
+    val csrNohypeMode = WireInit(csrioIn.customCtrl.lvna.get.nohypeModeSel)
+    val nohypeModeSelFromCSR = RegNextN(true.B, 4, Some(false.B))
+    val nohypeMode = csrNohypeMode && nohypeModeSelFromCSR
+    val memOff = Mux(nohypeMode, csrMemOff, memOffreg)
+    val ioOff = Mux(nohypeMode, csrIoOff, ioOffreg)
+    frontend.io.memOffset.get := memOff
+    frontend.io.ioOffset.get  := ioOff
+    memBlock.io.memOffset.get  := memOff
+    memBlock.io.ioOffset.get  := ioOff
+    ptw.io.memOffset := memOff
+    ptw.io.ioOffset := ioOff
+  }
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> fenceio.sfence
@@ -392,8 +422,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
 
-  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  if (coreParams.LvnaEnable && coreParams.HartId != 0 && outSoCParams.NohypeDevOffset != 0){
+    csrioIn.externalInterrupt.msip := 
+      outer.clint_int_sink.in.head._1(0) || outer.clint_int_sink.in.last._1(0)
+    csrioIn.externalInterrupt.mtip :=
+      outer.clint_int_sink.in.head._1(1) || outer.clint_int_sink.in.last._1(1)
+  }
+  else {
+    csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+    csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  }
   csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
   csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
@@ -421,6 +459,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.csr.tlb <> csrioIn.tlb
   ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
   ptw.io.csr.prefercache <> csrioIn.customCtrl.ptw_prefercache_enable
+  if (LvnaEnable) {
+    ptw.io.csr.dsid := csrioIn.customCtrl.lvna.get.dsid
+  }
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable

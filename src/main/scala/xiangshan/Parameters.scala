@@ -236,6 +236,10 @@ case class XSCoreParameters
     prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
+  //lvna paramters
+  LvnaEnable: Boolean = false,
+  DsidWidth: Int = 5,
+  
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only
 ){
@@ -253,6 +257,8 @@ case class XSCoreParameters
       Seq.fill(exuParameters.FmiscCnt)(FmiscExeUnitCfg)
 
   val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
+
+  val unusedDsid = ((1 << DsidWidth) - 1).U(DsidWidth.W)
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -275,6 +281,7 @@ trait HasXSParameter {
 
   val coreParams = p(XSCoreParamsKey)
   val env = p(DebugOptionsKey)
+  val outSoCParams = p(SoCParamsKey)
 
   val XLEN = coreParams.XLEN
   val minFLen = 32
