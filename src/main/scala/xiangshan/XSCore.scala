@@ -239,7 +239,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
-  // with HasXSDts
+   with HasXSDts
 {
   lazy val module = new XSCoreImp(this)
 }
