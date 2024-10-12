@@ -1,15 +1,15 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
-	url = ../xiangshan-submodule/rocket-chip.git
+	url = ../rocket-chip.git
 [submodule "difftest"]
 	path = difftest
-	url = ../xiangshan-submodule/difftest.git
+	url = ../difftest.git
 [submodule "ready-to-run"]
 	path = ready-to-run
-	url = ../xiangshan-submodule/ready-to-run.git
+	url = ../ready-to-run.git
 [submodule "huancun"]
 	path = huancun
-	url = ../xiangshan-submodule/huancun.git
+	url = ../huancun.git
 [submodule "fudian"]
 	path = fudian
-	url = ../xiangshan-submodule/fudian.git
+	url = ../fudian.git
